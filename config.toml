@@ -1,0 +1,18 @@
+policy_version = "1"
+symbol = "BTCJPY"
+
+[vote]
+mode = "weighted_majority"
+min_net_strength = 0.15
+weights = { market_maker = 1.0, arbitrage = 0.5, price_prediction = 1.2, momentum = 1.0 }
+
+[risk]
+max_position_units = 10.0
+max_order_size = 1.0
+max_daily_loss_abs = 50000.0
+
+[runtime]
+dry_run = true
+execution_mode = "dry_run"
+tick_interval_ms = 2000
+default_order_quantity = 0.01

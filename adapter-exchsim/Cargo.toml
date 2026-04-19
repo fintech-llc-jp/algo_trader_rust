@@ -1,0 +1,17 @@
+[package]
+name = "adapter-exchsim"
+version = "0.1.0"
+edition.workspace = true
+
+[dependencies]
+engine-core = { path = "../engine-core" }
+async-trait.workspace = true
+reqwest.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+wiremock = "0.6"
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }

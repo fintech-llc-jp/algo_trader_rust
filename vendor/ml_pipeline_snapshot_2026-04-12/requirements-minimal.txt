@@ -1,0 +1,23 @@
+# Minimal requirements for ML API Server
+# Core dependencies (compatible versions)
+pandas>=2.0.0
+numpy>=1.24.0,<2.0.0
+scikit-learn>=1.3.0
+xgboost>=2.0.0
+joblib>=1.3.0
+
+# Database
+psycopg2-binary>=2.9.0
+
+# Utilities
+python-dotenv>=1.0.0
+schedule>=1.2.0
+
+# API (required for ML API Server)
+fastapi>=0.104.0
+uvicorn[standard]>=0.24.0
+pydantic>=2.5.0
+
+# Redis (required for periodic signal publishing and LLM cache)
+redis>=5.0.0
+

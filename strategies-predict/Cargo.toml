@@ -1,0 +1,15 @@
+[package]
+name = "strategies-predict"
+version = "0.1.0"
+edition.workspace = true
+
+[dependencies]
+strategy-api = { path = "../strategy-api" }
+engine-core = { path = "../engine-core" }
+async-trait.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+ndarray = "0.17"
+ort = "2.0.0-rc.9"

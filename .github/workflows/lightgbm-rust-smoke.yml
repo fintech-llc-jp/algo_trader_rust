@@ -1,0 +1,45 @@
+name: lightgbm-rust-smoke
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - "tools/train-lightgbm-rs/**"
+      - "ml_bridge/**"
+      - ".github/workflows/lightgbm-rust-smoke.yml"
+
+jobs:
+  smoke:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install build dependencies (Ubuntu)
+        if: startsWith(matrix.os, 'ubuntu')
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake build-essential clang
+
+      - name: Verify cmake
+        run: cmake --version
+
+      - name: Run Rust LightGBM smoke training
+        run: |
+          cargo run --manifest-path tools/train-lightgbm-rs/Cargo.toml -- smoke \
+            --rows 256 \
+            --features 8 \
+            --seed 42 \
+            --out-dir artifacts/lightgbm-rs-smoke
+
+      - name: Upload smoke artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: lightgbm-rust-smoke-${{ matrix.os }}
+          path: artifacts/lightgbm-rs-smoke

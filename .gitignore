@@ -1,0 +1,54 @@
+# Rust / Cargo
+/target/
+/debug/
+/release/
+**/*.rs.bk
+*.orig
+*.pdb
+
+# Python（ml_bridge / vendor スナップショット）
+**/__pycache__/
+**/*.py[cod]
+*$py.class
+**/.Python
+**/venv/
+**/.venv/
+**/env/
+**/.eggs/
+**/*.egg-info/
+**/.pytest_cache/
+**/.mypy_cache/
+**/.ruff_cache/
+**/.tox/
+**/pip-log.txt
+**/.ipynb_checkpoints/
+
+# 秘密情報・ローカル設定
+.env
+**/.env
+!.env.example
+!**/.env.example
+*.pem
+*.key
+config.local.toml
+*.local.toml
+
+# エディタ・OS
+.DS_Store
+.idea/
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json.example
+Thumbs.db
+*~
+*.swp
+*.swo
+
+# ログ・一時ファイル
+*.log
+*.tmp
+*.onnx.tmp
+**/logs/
+
+# 大きな生成物（必要なら LFS や別ストアへ）
+# ― ml_bridge/model.onnx は CI 用に同梱するため無視しない

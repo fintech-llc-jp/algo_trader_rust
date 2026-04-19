@@ -1,0 +1,24 @@
+[package]
+name = "algo-trader-app"
+version = "0.1.0"
+edition.workspace = true
+
+[[bin]]
+name = "algo-trader"
+path = "src/main.rs"
+
+[dependencies]
+engine-core = { path = "../engine-core" }
+strategy-api = { path = "../strategy-api" }
+adapter-exchsim = { path = "../adapter-exchsim" }
+strategies-mm = { path = "../strategies-mm" }
+strategies-arb = { path = "../strategies-arb" }
+strategies-momentum = { path = "../strategies-momentum" }
+strategies-predict = { path = "../strategies-predict" }
+tokio.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+figment.workspace = true
+serde.workspace = true
+async-trait.workspace = true
+anyhow = "1"

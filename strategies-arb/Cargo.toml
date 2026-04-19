@@ -1,0 +1,9 @@
+[package]
+name = "strategies-arb"
+version = "0.1.0"
+edition.workspace = true
+
+[dependencies]
+strategy-api = { path = "../strategy-api" }
+engine-core = { path = "../engine-core" }
+async-trait.workspace = true
