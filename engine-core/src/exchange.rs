@@ -83,6 +83,40 @@ impl OrderBook {
     pub fn best_ask(&self) -> Option<f64> {
         self.asks.first().and_then(|l| l.price)
     }
+
+    pub fn best_bid_qty(&self) -> Option<f64> {
+        self.bids.first().and_then(|l| l.quantity)
+    }
+
+    pub fn best_ask_qty(&self) -> Option<f64> {
+        self.asks.first().and_then(|l| l.quantity)
+    }
+}
+
+/// ExchSim `GET /api/positions/summary` body (subset).
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct PositionSummary {
+    #[serde(default)]
+    pub positions: Vec<PositionEntry>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct PositionEntry {
+    #[serde(default)]
+    pub symbol: Option<String>,
+    #[serde(default)]
+    pub quantity: Option<f64>,
+}
+
+impl PositionSummary {
+    /// Signed quantity for `symbol`, or 0.0 if not listed.
+    pub fn quantity_for_symbol(&self, symbol: &str) -> f64 {
+        self.positions
+            .iter()
+            .find(|p| p.symbol.as_deref() == Some(symbol))
+            .and_then(|p| p.quantity)
+            .unwrap_or(0.0)
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -112,4 +146,6 @@ pub trait Exchange: Send + Sync {
     ) -> Result<CancelOrderResponse, ExchangeError>;
 
     async fn get_order_book(&self, symbol: &str) -> Result<OrderBook, ExchangeError>;
+
+    async fn get_position_summary(&self) -> Result<PositionSummary, ExchangeError>;
 }

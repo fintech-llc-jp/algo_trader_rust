@@ -25,10 +25,10 @@
 
 1. `tick_interval_ms` ごとに待機
 2. `kill_switch_active(runtime.kill_switch_path)` が真ならスキップ
-3. `sample_snapshot`（**現状スタブ**: 固定気配・2 本のバー）で `MarketSnapshot` を構築
-4. 登録済み 4 戦略の `evaluate` を **順に await** し `Vec<StrategyVote>` を構築
+3. **市場スナップショット**: `[exchange]` が有効で `Exchange` を構築できている場合は `get_order_book` で板から `MarketSnapshot` を組み立てる。取得失敗時、または取引所未設定時は **`sample_snapshot`**（固定気配・2 本のバー相当のスタブ）にフォールバックする。
+4. 登録済み戦略の `evaluate` を **順に await** し `Vec<StrategyVote>` を構築
 5. `TradingPipeline::decide` → `log_tick`
-6. `is_live_execution()` が真かつ `Intent::PlaceOrder` のとき、現状は **ログのみ**（実際の `Exchange::place_order` 呼び出しは未配線）
+6. **発注**: `is_live_execution()` が真かつ `Intent::PlaceOrder` のとき、`Exchange::place_order` を呼び出す（`dry_run` / `ExecutionMode::DryRun` では呼ばない）。失敗時はログに記録する。
 
 ## ONNX パス解決
 
@@ -36,5 +36,5 @@
 
 ## 拡張ポイント
 
-- `sample_snapshot` を `adapter-exchsim` の `get_order_book` と DB/Redis からのバーに差し替える
-- `live` 時に `Intent` → `NewOrderRequest` 変換と `Exchange` 呼び出し
+- `sample_snapshot` を DB/Redis 等の実データソースとマージする、複数ソースからの合成など
+- 追加戦略・投票ポリシー、`RiskLimits` の動的反映（設定ホットリロード等）

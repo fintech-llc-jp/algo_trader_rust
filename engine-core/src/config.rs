@@ -14,6 +14,23 @@ pub struct AppConfig {
     pub risk: RiskLimits,
     #[serde(default)]
     pub runtime: RuntimeConfig,
+    /// When set, `app` uses [`crate::exchange::Exchange`] (ExchSim) for board, orders, positions.
+    #[serde(default)]
+    pub exchange: Option<ExchangeConfig>,
+}
+
+/// ExchSim REST endpoint and credentials via environment variable names (values are not stored in TOML).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ExchangeConfig {
+    pub base_url: String,
+    /// JWT: read from `std::env::var(token_env)` (e.g. `EXCHSIM_JWT_TOKEN`).
+    #[serde(default)]
+    pub token_env: Option<String>,
+    /// Alternative: login with `std::env::var(username_env)` and `password_env`.
+    #[serde(default)]
+    pub username_env: Option<String>,
+    #[serde(default)]
+    pub password_env: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -29,6 +46,9 @@ pub struct RuntimeConfig {
     pub tick_interval_ms: u64,
     #[serde(default = "default_order_qty")]
     pub default_order_quantity: f64,
+    /// How often to refresh [`crate::risk::RiskService`] position from the exchange (ms). `0` = every tick.
+    #[serde(default = "default_sync_position_interval_ms")]
+    pub sync_position_interval_ms: u64,
 }
 
 fn default_dry_run() -> bool {
@@ -43,6 +63,10 @@ fn default_order_qty() -> f64 {
     0.01
 }
 
+fn default_sync_position_interval_ms() -> u64 {
+    5000
+}
+
 impl Default for RuntimeConfig {
     fn default() -> Self {
         Self {
@@ -51,6 +75,7 @@ impl Default for RuntimeConfig {
             kill_switch_path: None,
             tick_interval_ms: 1000,
             default_order_quantity: 0.01,
+            sync_position_interval_ms: 5000,
         }
     }
 }

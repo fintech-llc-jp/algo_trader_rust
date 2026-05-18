@@ -7,6 +7,14 @@ edition.workspace = true
 name = "algo-trader"
 path = "src/main.rs"
 
+[[bin]]
+name = "algo-trader-control"
+path = "src/control.rs"
+
+[[bin]]
+name = "algo-trader-bff"
+path = "src/bff.rs"
+
 [dependencies]
 engine-core = { path = "../engine-core" }
 strategy-api = { path = "../strategy-api" }
@@ -20,5 +28,8 @@ tracing.workspace = true
 tracing-subscriber.workspace = true
 figment.workspace = true
 serde.workspace = true
-async-trait.workspace = true
+serde_json.workspace = true
 anyhow = "1"
+axum = "0.8"
+reqwest.workspace = true
+tower-http = { version = "0.6", features = ["cors"] }

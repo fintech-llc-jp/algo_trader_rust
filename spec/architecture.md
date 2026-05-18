@@ -16,7 +16,7 @@ MarketSnapshot
     → Intent（最終）
 ```
 
-取引所 I/O は **`Exchange` トレイト**（`engine-core`）を実装するアダプタ（現状 **`adapter-exchsim::ExchSimAdapter`**）が担当。`app` のメインループは現状 **スタブ `MarketSnapshot`** を渡しており、板取得を `Exchange` に接続するのは今後の拡張ポイントである。
+取引所 I/O は **`Exchange` トレイト**（`engine-core`）を実装するアダプタ（現状 **`adapter-exchsim::ExchSimAdapter`**）が担当。`app` のメインループは、**設定で取引所が有効なときは `Exchange::get_order_book` で板から `MarketSnapshot` を構築**し、未設定または取得失敗時は **スタブの `MarketSnapshot`**（`sample_snapshot`）にフォールバックする。**ライブ実行モード**では `Intent::PlaceOrder` に対し **`Exchange::place_order` まで配線済み**である（`dry_run` では発注 API を呼ばない）。
 
 ## クレート依存（向き）
 

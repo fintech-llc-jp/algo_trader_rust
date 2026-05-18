@@ -8,10 +8,10 @@ pub mod runtime;
 pub mod types;
 pub mod vote;
 
-pub use config::AppConfig;
+pub use config::{AppConfig, ExchangeConfig};
 pub use exchange::{
     CancelOrderRequest, CancelOrderResponse, Exchange, ExchangeError, LoginRequest, LoginResponse,
-    NewOrderRequest, NewOrderResponse, OrderBook, OrderBookLevel,
+    NewOrderRequest, NewOrderResponse, OrderBook, OrderBookLevel, PositionEntry, PositionSummary,
 };
 pub use pipeline::{PipelineResult, TradingPipeline};
 pub use risk::{RiskDecision, RiskLimits, RiskService};

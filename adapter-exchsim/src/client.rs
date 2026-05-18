@@ -1,7 +1,7 @@
 use async_trait::async_trait;
 use engine_core::{
     CancelOrderRequest, CancelOrderResponse, Exchange, ExchangeError, LoginRequest, LoginResponse,
-    NewOrderRequest, NewOrderResponse, OrderBook,
+    NewOrderRequest, NewOrderResponse, OrderBook, PositionSummary,
 };
 use reqwest::Client;
 use std::sync::RwLock;
@@ -167,6 +167,18 @@ impl Exchange for ExchSimAdapter {
         debug!(%path, "fetch order book");
         self.get_json(&path, headers).await
     }
+
+    async fn get_position_summary(&self) -> Result<PositionSummary, ExchangeError> {
+        self.login_or_refresh().await?;
+        let token = self
+            .token
+            .read()
+            .unwrap()
+            .clone()
+            .ok_or_else(|| ExchangeError::BadResponse("no token".into()))?;
+        let headers = Self::auth_headers(&token);
+        self.get_json("/api/positions/summary", headers).await
+    }
 }
 
 #[cfg(test)]
@@ -201,5 +213,29 @@ mod tests {
         let ob = a.get_order_book("BTCJPY").await.unwrap();
         assert_eq!(ob.best_bid(), Some(100.0));
         assert_eq!(ob.best_ask(), Some(101.0));
+    }
+
+    #[tokio::test]
+    async fn login_and_fetch_positions() {
+        let srv = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/api/auth/login"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "token": "t0",
+                "username": "u"
+            })))
+            .mount(&srv)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/api/positions/summary"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "positions": [{"symbol": "BTCJPY", "quantity": 0.02}]
+            })))
+            .mount(&srv)
+            .await;
+
+        let a = ExchSimAdapter::from_credentials(srv.uri(), "u", "p");
+        let ps = a.get_position_summary().await.unwrap();
+        assert_eq!(ps.quantity_for_symbol("BTCJPY"), 0.02);
     }
 }

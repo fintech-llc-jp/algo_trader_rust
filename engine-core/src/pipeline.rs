@@ -15,7 +15,6 @@ pub struct PipelineResult {
 pub struct TradingPipeline {
     policy_version: String,
     vote_policy: VotePolicy,
-    risk: RiskService,
     symbol: String,
     default_quantity: f64,
     execution_mode: ExecutionMode,
@@ -27,7 +26,6 @@ impl TradingPipeline {
         policy_version: String,
         symbol: String,
         vote_policy: VotePolicy,
-        risk: RiskService,
         default_quantity: f64,
         execution_mode: ExecutionMode,
         dry_run: bool,
@@ -36,7 +34,6 @@ impl TradingPipeline {
             policy_version,
             symbol,
             vote_policy,
-            risk,
             default_quantity,
             execution_mode,
             dry_run,
@@ -44,7 +41,7 @@ impl TradingPipeline {
     }
 
     /// Evaluate votes → aggregate → risk → intent (no I/O).
-    pub fn decide(&self, votes: &[StrategyVote]) -> PipelineResult {
+    pub fn decide(&self, votes: &[StrategyVote], risk: &RiskService) -> PipelineResult {
         let vote_outcome = match VoteEngine::aggregate(votes, &self.vote_policy) {
             Ok(o) => o,
             Err(e) => {
@@ -77,7 +74,7 @@ impl TradingPipeline {
             },
         };
 
-        let intent = self.risk.apply(intent_raw, &self.symbol);
+        let intent = risk.apply(intent_raw, &self.symbol);
 
         if self.dry_run || matches!(self.execution_mode, ExecutionMode::DryRun) {
             if let Intent::PlaceOrder { .. } = &intent {
@@ -143,7 +140,6 @@ mod tests {
             "1".into(),
             "BTCJPY".into(),
             vp,
-            risk,
             0.1,
             ExecutionMode::DryRun,
             true,
@@ -152,7 +148,7 @@ mod tests {
             mk_vote("a", VoteSide::Buy, 0.5),
             mk_vote("b", VoteSide::Sell, 0.5),
         ];
-        let r = p.decide(&votes);
+        let r = p.decide(&votes, &risk);
         assert!(matches!(r.intent, Intent::NoTrade { .. }));
     }
 }

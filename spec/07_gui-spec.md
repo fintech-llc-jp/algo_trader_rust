@@ -1,7 +1,9 @@
 # GUI設計書（部品・動作網羅、デザイン非依存）
 
-本書は `spec/user-stories-and-sequences.md` のストーリーを実現するために必要な GUI の要件定義です。  
+本書は [01_business-requirements.md](01_business-requirements.md) のユースケース表・機能要求一覧を反映し、[03_sequence_diagram.md](03_sequence_diagram.md) の時系列（対象システムとの相互作用）を実現するために必要な GUI の要件定義です。  
 見た目（配色、余白、タイポ）は対象外とし、**必要部品・状態・操作・イベント・権限・エラー挙動**を定義します。
+
+- **関連ドキュメント:** UC 一覧・ID は [02_use-case-diagram.md](02_use-case-diagram.md)、境界の静的図は [04_c4-level1-system-context.md](04_c4-level1-system-context.md) / [05_c4-level2-containers.md](05_c4-level2-containers.md)、Rust 側の境界は [06_external-design.md](06_external-design.md)。
 
 ---
 
@@ -43,6 +45,7 @@
 - `Runtime Control`（dry/live、tick、キルスイッチ）
 - `Config Editor`（policy/risk/runtime の編集と適用）
 - `Audit Log`（変更履歴・実行履歴）
+- `ML Training`（学習ジョブ投入・状態確認。BFF 前提の付帯機能）
 - `Orders`（Phase2: 注文ライフサイクル）
 - `Data Sources`（Phase2: 板/バー取得状況）
 
@@ -203,7 +206,7 @@
 
 ### 挙動要件
 
-- すべての破壊的操作は必ず監査ログ記録
+- **破壊的／制御操作**（設定 Apply、モード切替、キルスイッチ等）は必ず監査ログ記録（[01_business-requirements.md](01_business-requirements.md) の FR-08 とは役割分担: 全体の実行トレース保持は Should、**制御平面の当該操作の記録は本 GUI 要件として Must**）。
 - 各イベントに相関IDを持たせ、ティック判断ログと突合可能にする
 
 ---
@@ -336,6 +339,8 @@ stateDiagram-v2
 
 ## 10. 監査とセキュリティ
 
+- **現状（PoC）:** 以下の Must は**製品要求として維持**する一方、現行コードベースは PoC のため **制御 API の本格的認証・権限・サーバ側監査は未充足**である（詳細は [01_business-requirements.md](01_business-requirements.md) §8.1、[06_external-design.md](06_external-design.md) の「認証（現状 PoC）」）。当面はデプロイ境界で補い、バックログで本節に追いつかせる。
+- ビジネス要求 [01_business-requirements.md](01_business-requirements.md) の FR-08（実行トレース全体は Should）と役割分担し、**制御系の監査・認証**は本節および §4.6 を Must として満たすこと。
 - 監査対象操作
   - 設定Apply、モード切替、キルスイッチ操作、リスク閾値変更
 - 各操作に記録する項目
@@ -396,3 +401,57 @@ stateDiagram-v2
 - アラートの重要度分類（info/warn/error/critical）
 
 この情報があれば、UIデザイン側はレイアウトとビジュアルルールに専念できます。
+
+---
+
+## 15. 現状実装（`sentinel-ledger` MVP）との差分
+
+本節は、リポジトリ内の **実際にエントリから描画されている GUI**（`sentinel-ledger/src/App.tsx` → `mvp/*`）と、本書の要件のギャップを固定化する。デザイン用の静的モック（`sentinel-ledger/src/components/*`）は **現行 `App.tsx` から未参照**であり、ドメイン用語も本プロダクトと一致しない箇所があるため、**実装比較の主対象外**とする。
+
+### 15.1 実装の所在（比較の前提）
+
+| 種別 | パス | 本書との関係 |
+|---|---|---|
+| 本番ルート UI | `sentinel-ledger/src/App.tsx`, `sentinel-ledger/src/mvp/*.tsx` | ここを「現状 GUI」とみなす |
+| BFF クライアント等 | `sentinel-ledger/src/mvp/api.ts` ほか | 設計書の backend 契約の暫定実装 |
+| 静的モック（未配線） | `sentinel-ledger/src/components/*.tsx` | ビジュアル探索用。要件トレースの根拠にはしない |
+
+### 15.2 画面・機能の対応表
+
+| 本書（章3・章4） | MVP の状況 | 備考 |
+|---|---|---|
+| `Dashboard` | **実装あり**（簡素） | KPI・タイムライン・アラートはあるが、設計書ほどのカード分割・統計は未整備 |
+| `Strategy & Vote Monitor` | **実装あり** | 票テーブル、`strategy_id` / `side` フィルタ、選択ティック、追従 ON/OFF あり |
+| `Risk Control` | **実装あり** | 閾値更新・`daily_pnl` 更新が BFF 経由。ブロック理由の専用チャート等は簡略 |
+| `Runtime Control` + `Config Editor` | **1 画面に統合**（`Runtime & Config`） | 本書はタブ分離を想定したが MVP は統合 |
+| Raw TOML / DiffViewer | **JSON で applied/draft 表示** | TOML 原文・行単位 diff は未実装 |
+| `kill_switch_path`（ファイル存在） | **UI は boolean のみ** | `engine-core` のファイルベース KS と意味が異なる。将来はファイル API に寄せる想定 |
+| `Audit Log` | **実装あり**（簡素） | `actor` / `event` フィルタのみ。期間レンジ・CSV/JSON エクスポート UI は未実装 |
+| `ML Training` | **実装あり** | 本書に当初未記載のため章3で追記済み |
+| `Orders`（Phase2） | **未実装** | — |
+| `Data Sources`（Phase2） | **未実装** | — |
+| ロール別権限（章2） | **未実装** | 監査の `actor` は固定文字列に近い |
+| 競合更新・マージ UI（章9） | **未実装** | — |
+| エンジンセッション起動/停止（BFF `/v1/sessions`） | **実装あり**（サイドバー） | ユーザーストーリー文脈外だが運用 GUI として先行 |
+
+### 15.3 挙動・状態モデル（章6・章7）との差分
+
+| 本書の想定 | MVP |
+|---|---|
+| `CONFIG_APPLY` の確認ダイアログ | `live` 選択時のみ `window.confirm`。それ以外は即 Apply |
+| `KILL_SWITCH_TOGGLED` とファイル I/O | ローカル state の反転 + 監査イベント。パス指定・FS エラー表示なし |
+| `streamState`（SSE 等） | ティックはクライアント側シミュレーションが主。BFF は health / metrics / session のポーリング |
+| Toast / NotificationCenter | アラートは Dashboard 内の配列表示に近い |
+
+### 15.4 静的モック `components/*` について
+
+- `App.tsx` が import していないため **現行プロダクトの動作仕様ではない**。
+- 表示項目に本リポジトリの `VotePolicy` / `RiskLimits` と無関係な概念（例: ガス、クラスタノード）が混在しうる。
+- デザイン AI に渡す参照として使う場合は、「**レイアウト参考**」に限定し、データ項目は本書・`mvp/types` に合わせて差し替えること。
+
+### 15.5 今後の同期方針（推奨）
+
+1. **キルスイッチ**: UI を `kill_switch_path` の作成/削除 API（または安全な代理操作）に寄せ、本書の Runtime 要件とエンジン仕様を一致させる。  
+2. **設定差分**: JSON 表示から TOML プレビュー＋行 diff へ段階的に移行するか、本書を「JSON でも可」と明文化する。  
+3. **Audit**: 期間フィルタとエクスポートを追加するか、本書から MVP スコープとして削る。  
+4. **Orders / Data Sources**: Phase2 として本書のまま維持し、実装タスクに紐づける。
