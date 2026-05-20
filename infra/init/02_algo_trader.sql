@@ -6,7 +6,7 @@
 CREATE DATABASE algo_trader;
 \c algo_trader
 
-CREATE TABLE ml_models (
+CREATE TABLE IF NOT EXISTS ml_models (
     id                   BIGSERIAL    PRIMARY KEY,
     model_name           VARCHAR(255) NOT NULL,
     model_type           VARCHAR(100) NOT NULL,

@@ -8,7 +8,7 @@ CREATE DATABASE exch_sim;
 
 -- ----- 市場データ（ML 学習の主要入力） -----
 
-CREATE TABLE market_board_snapshots (
+CREATE TABLE IF NOT EXISTS market_board_snapshots (
     id        BIGSERIAL PRIMARY KEY,
     symbol    VARCHAR(50) NOT NULL,
     timestamp TIMESTAMP   NOT NULL
@@ -16,7 +16,7 @@ CREATE TABLE market_board_snapshots (
 CREATE INDEX idx_market_board_snapshots_symbol_timestamp
     ON market_board_snapshots (symbol, timestamp);
 
-CREATE TABLE market_board_price_levels (
+CREATE TABLE IF NOT EXISTS market_board_price_levels (
     id          BIGSERIAL PRIMARY KEY,
     snapshot_id BIGINT           NOT NULL
         REFERENCES market_board_snapshots(id) ON DELETE CASCADE,
@@ -28,7 +28,7 @@ CREATE TABLE market_board_price_levels (
 
 -- ----- 約定履歴 -----
 
-CREATE TABLE executions (
+CREATE TABLE IF NOT EXISTS executions (
     exec_id                VARCHAR(255) PRIMARY KEY,
     order_id               VARCHAR(255),
     username               VARCHAR(255),
@@ -54,7 +54,7 @@ CREATE INDEX idx_execution_volume_calc
 
 -- ----- ポジション -----
 
-CREATE TABLE positions (
+CREATE TABLE IF NOT EXISTS positions (
     id                  VARCHAR(255)     PRIMARY KEY,
     username            VARCHAR(255)     NOT NULL,
     symbol              VARCHAR(255)     NOT NULL,
@@ -72,7 +72,7 @@ CREATE TABLE positions (
 
 -- ----- 取引履歴 -----
 
-CREATE TABLE trade_history (
+CREATE TABLE IF NOT EXISTS trade_history (
     exec_id                VARCHAR(255)     PRIMARY KEY,
     username               VARCHAR(255)     NOT NULL,
     symbol                 VARCHAR(255)     NOT NULL,
@@ -99,16 +99,50 @@ CREATE INDEX idx_trade_history_user_symbol_open
 
 -- ----- ユーザー管理 -----
 
-CREATE TABLE users (
+CREATE TABLE IF NOT EXISTS users (
     username   VARCHAR(255) PRIMARY KEY,
     password   VARCHAR(255) NOT NULL,
     created_at TIMESTAMP    NOT NULL,
     updated_at TIMESTAMP    NOT NULL
 );
 
-CREATE TABLE user_roles (
+CREATE TABLE IF NOT EXISTS user_roles (
     username VARCHAR(255) NOT NULL
         REFERENCES users(username) ON DELETE CASCADE,
     role     VARCHAR(255) NOT NULL,
     PRIMARY KEY (username, role)
 );
+
+-- ----- 予測トラッカー（prediction_tracker.py が使用） -----
+
+CREATE TABLE IF NOT EXISTS prediction_tracker_predictions (
+    id                   BIGSERIAL        PRIMARY KEY,
+    symbol               VARCHAR(50)      NOT NULL,
+    horizon              VARCHAR(20)      NOT NULL,
+    prediction_timestamp TIMESTAMP        NOT NULL,
+    target_timestamp     TIMESTAMP        NOT NULL,
+    current_price        DOUBLE PRECISION NOT NULL,
+    predicted_price      DOUBLE PRECISION NOT NULL,
+    price_change_pct     DOUBLE PRECISION,
+    prev_error           DOUBLE PRECISION,
+    is_feedback_enabled  BOOLEAN          NOT NULL DEFAULT FALSE
+);
+CREATE INDEX idx_prediction_tracker_predictions_symbol_horizon
+    ON prediction_tracker_predictions (symbol, horizon, prediction_timestamp);
+
+CREATE TABLE IF NOT EXISTS prediction_tracker_verifications (
+    id                   BIGSERIAL        PRIMARY KEY,
+    prediction_id        BIGINT           NOT NULL
+        REFERENCES prediction_tracker_predictions(id) ON DELETE CASCADE,
+    symbol               VARCHAR(50)      NOT NULL,
+    horizon              VARCHAR(20)      NOT NULL,
+    prediction_timestamp TIMESTAMP        NOT NULL,
+    target_timestamp     TIMESTAMP        NOT NULL,
+    actual_timestamp     TIMESTAMP        NOT NULL,
+    predicted_price      DOUBLE PRECISION NOT NULL,
+    actual_price         DOUBLE PRECISION NOT NULL,
+    error                DOUBLE PRECISION NOT NULL,
+    error_pct            DOUBLE PRECISION NOT NULL
+);
+CREATE INDEX idx_prediction_tracker_verifications_symbol
+    ON prediction_tracker_verifications (symbol, horizon, prediction_timestamp);
