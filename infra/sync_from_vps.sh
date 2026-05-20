@@ -69,6 +69,8 @@ if [[ "${MODE}" == "--full" ]]; then
 
     echo "[4/5] VPS から全テーブルをコピー..."
 
+    # prediction_tracker_* は VPS に存在しないためコピーしない（ローカルで ML パイプラインが生成）
+
     # users → user_roles（FK 順）
     echo "  コピー中: users..."
     ssh "${VPS_HOST}" "${VPS_PSQL} -c \"\COPY (SELECT username, password, created_at, updated_at FROM users) TO stdout\"" \
@@ -146,6 +148,7 @@ else
     else
         echo "  新規データなし（price_levels スキップ）"
     fi
+    # prediction_tracker_* は VPS に存在しないためスキップ（ローカル生成データ）
 fi
 
 # ----- 完了レポート -----
@@ -166,6 +169,8 @@ psql "${LOCAL_EXCH_SIM}" -c "
     SELECT 'user_roles'                     AS table_name, COUNT(*) AS rows FROM user_roles
     UNION ALL
     SELECT 'prediction_tracker_predictions' AS table_name, COUNT(*) AS rows FROM prediction_tracker_predictions
+    UNION ALL
+    SELECT 'prediction_tracker_verifications' AS table_name, COUNT(*) AS rows FROM prediction_tracker_verifications
     ORDER BY table_name;
 "
 echo "=========================================="
