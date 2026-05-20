@@ -28,6 +28,7 @@
 **/.env
 !.env.example
 !**/.env.example
+infra/.env.local
 *.pem
 *.key
 config.local.toml
