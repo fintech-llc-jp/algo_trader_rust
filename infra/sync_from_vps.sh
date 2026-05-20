@@ -22,7 +22,12 @@ DAYS=3
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --full)        MODE="--full";        shift ;;
-        --incremental) MODE="--incremental"; shift; [[ $# -gt 0 ]] && DAYS="$1" && shift ;;
+        --incremental) MODE="--incremental"; shift
+            if [[ $# -gt 0 ]]; then
+                [[ "$1" =~ ^[0-9]+$ ]] || { echo "ERROR: DAYS は正の整数で指定してください（例: --incremental 7）"; exit 1; }
+                DAYS="$1"; shift
+            fi
+            ;;
         *) echo "Unknown option: $1"; exit 1 ;;
     esac
 done
@@ -54,8 +59,6 @@ if [[ "${MODE}" == "--full" ]]; then
     echo "[3/5] ローカル exch_sim を TRUNCATE..."
     psql "${LOCAL_EXCH_SIM}" -c "
         TRUNCATE TABLE
-            prediction_tracker_verifications,
-            prediction_tracker_predictions,
             market_board_price_levels,
             market_board_snapshots,
             trade_history,
@@ -140,15 +143,16 @@ else
         ) TO stdout\"" \
             | psql "${LOCAL_EXCH_SIM}" -c "\COPY market_board_price_levels (id, snapshot_id, price, quantity, side, level_index) FROM stdin"
 
-        # シーケンスをリセット
-        psql "${LOCAL_EXCH_SIM}" -c "
-            SELECT setval('market_board_snapshots_id_seq',    COALESCE(MAX(id), 1)) FROM market_board_snapshots;
-            SELECT setval('market_board_price_levels_id_seq', COALESCE(MAX(id), 1)) FROM market_board_price_levels;
-        " > /dev/null
     else
         echo "  新規データなし（price_levels スキップ）"
     fi
     # prediction_tracker_* は VPS に存在しないためスキップ（ローカル生成データ）
+
+    # シーケンスをリセット（新規データがなくてもリセット）
+    psql "${LOCAL_EXCH_SIM}" -c "
+        SELECT setval('market_board_snapshots_id_seq',    COALESCE(MAX(id), 1)) FROM market_board_snapshots;
+        SELECT setval('market_board_price_levels_id_seq', COALESCE(MAX(id), 1)) FROM market_board_price_levels;
+    " > /dev/null
 fi
 
 # ----- 完了レポート -----
