@@ -46,8 +46,54 @@ cargo clippy --workspace --all-targets -- -D warnings
 - 環境変数オーバーレイ: プレフィックス `ALGO_TRADER_`、区切り `__`（[figment](https://docs.rs/figment/)）
 
 ```bash
-cargo run -p algo-trader-app -- path/to/config.toml
+cargo run -p algo-trader-app --bin algo-trader -- path/to/config.toml
+# session control API (POST/DELETE/GET /sessions)
+cargo run -p algo-trader-app --bin algo-trader-control
+# minimal BFF (single Base URL)
+cargo run -p algo-trader-app --bin algo-trader-bff
 ```
+
+`algo-trader-bff` は以下を提供します。
+
+- `POST /v1/sessions` / `DELETE /v1/sessions/{id}` / `GET /v1/sessions/{id}/status`
+- `POST /v1/training/jobs` / `GET /v1/training/jobs/{job_id}` / `DELETE /v1/training/jobs/{job_id}`
+- `POST /v1/backtests` / `GET /v1/backtests/{job_id}` / `DELETE /v1/backtests/{job_id}` / `GET /v1/backtests/{job_id}/result`
+- `GET /v1/models`
+- `GET /metrics`（BFF メトリクス）
+
+`/v1/training/jobs*` と `/v1/backtests*` は BFF 側で共通のジョブ形式に正規化します:
+`job_id`, `kind`, `status`, `progress`, `message`, `done`, `result`, `upstream`
+
+接続先は環境変数で切り替えます（既定値あり）。
+
+- `ALGO_TRADER_CONTROL_BASE_URL` (default: `http://127.0.0.1:8088`)
+- `ALGO_TRADER_PY_TRAINING_BASE_URL` (default: `http://127.0.0.1:8001`)
+- `ALGO_TRADER_PY_BACKTEST_BASE_URL` (default: `http://127.0.0.1:8002`)
+- `ALGO_TRADER_PY_ML_BASE_URL` (default: `http://127.0.0.1:8000`)
+- `ALGO_TRADER_BFF_TIMEOUT_MS` (default: `5000`)
+- `ALGO_TRADER_BFF_GET_RETRY` (default: `1`, GET のみ再試行回数)
+- `ALGO_TRADER_BFF_IDEMPOTENCY_TTL_MS` (default: `900000`)
+- `ALGO_TRADER_BFF_IDEMPOTENCY_MAX_ENTRIES` (default: `1000`)
+- `ALGO_TRADER_BFF_IDEMPOTENCY_STORE_PATH`（任意。指定時は idempotency キャッシュをファイル永続化）
+- `ALGO_TRADER_BFF_READ_API_KEY`（任意。設定時は read/write API にキー必須）
+- `ALGO_TRADER_BFF_WRITE_API_KEY`（任意。設定時は write API にキー必須）
+
+認証キーは `x-api-key` または `Authorization: Bearer <key>` で渡せます。  
+エラーは BFF で共通化され、`error.code` / `error.message` / `error.correlation_id` / `error.upstream_service` を返します。
+
+`POST /v1/sessions`, `POST /v1/training/jobs`, `POST /v1/backtests` は `Idempotency-Key` ヘッダをサポートします。同じキーで再送した場合、BFF のキャッシュ済みレスポンスを返します。
+（キャッシュは TTL と件数上限で自動掃除されます）
+
+主な `error.code`:
+
+- `AUTH_001`: API key が未指定
+- `AUTH_002`: 権限不足（read/write ミスマッチ）
+- `UPSTREAM_001`: upstream timeout
+- `UPSTREAM_002`: upstream connect failed
+- `UPSTREAM_003`: upstream request failed
+
+`algo-trader-control` も `GET /metrics` を提供し、`Accept: text/plain` で Prometheus 形式を返せます（未指定時は JSON）。
+`algo-trader-bff` の `GET /metrics` も同様に Prometheus 形式を返せます。
 
 `algo-trader-app` の `CARGO_MANIFEST_DIR` から見た **ワークスペースルート** の `ml_bridge/model.onnx` を価格予測に利用します。
 

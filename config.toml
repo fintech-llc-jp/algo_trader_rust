@@ -1,5 +1,6 @@
 policy_version = "1"
-symbol = "BTCJPY"
+# ExchSim の銘柄（Java engine と同じ既定。違う場合は ExchSim 側に合わせて変更）
+symbol = "G_FX_BTCJPY"
 
 [vote]
 mode = "weighted_majority"
@@ -16,3 +17,14 @@ dry_run = true
 execution_mode = "dry_run"
 tick_interval_ms = 2000
 default_order_quantity = 0.01
+# How often to pull position from ExchSim (ms). Used when [exchange] is set.
+sync_position_interval_ms = 5000
+
+# PoC: VPS 上の ExchSim。認証:
+#   export EXCHSIM_USERNAME='...'
+#   export EXCHSIM_PASSWORD='...'
+#   cargo run -p algo-trader-app --bin algo-trader -- config.toml
+[exchange]
+base_url = "http://77.42.74.155:8080"
+username_env = "EXCHSIM_USERNAME"
+password_env = "EXCHSIM_PASSWORD"

@@ -46,6 +46,20 @@ active_training_jobs = set()
 training_lock = asyncio.Lock()
 
 
+def _job_cancel_requested(job_id: str) -> bool:
+    return bool(training_jobs.get(job_id, {}).get("cancel_requested", False))
+
+
+def _mark_job_stopped(job_id: str, message: str = "Training cancelled") -> None:
+    if job_id not in training_jobs:
+        return
+    training_jobs[job_id]["status"] = "stopped"
+    training_jobs[job_id]["message"] = message
+    training_jobs[job_id]["progress"] = training_jobs[job_id].get("progress", 0.0)
+    training_jobs[job_id]["result"] = training_jobs[job_id].get("result")
+    training_jobs[job_id]["cancel_requested"] = True
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """アプリケーションのライフサイクル管理"""
@@ -137,22 +151,31 @@ async def train_model_task(job_id: str, request: RetrainRequest):
     
     # 同時実行数が上限に達している場合は待機
     while len(active_training_jobs) >= MAX_CONCURRENT_TRAINING_JOBS:
+        if _job_cancel_requested(job_id):
+            _mark_job_stopped(job_id, "Training cancelled while waiting in queue")
+            return
         await asyncio.sleep(1)
     
     # アクティブジョブに追加
     async with training_lock:
         active_training_jobs.add(job_id)
     
-    training_jobs[job_id] = {
+    training_jobs.setdefault(job_id, {})
+    training_jobs[job_id].update({
         "status": "running",
-        "progress": 0.0,
+        "progress": training_jobs[job_id].get("progress", 0.0),
         "message": "Training started",
-        "result": None
-    }
+        "result": training_jobs[job_id].get("result"),
+        "cancel_requested": training_jobs[job_id].get("cancel_requested", False),
+    })
     
     logger.info(f"Training job {job_id} started: model_name={request.model_name}, symbol={request.symbol}, models={request.models}")
     
     try:
+        if _job_cancel_requested(job_id):
+            _mark_job_stopped(job_id, "Training cancelled before execution")
+            return
+
         # 日時文字列をdatetimeに変換
         start_date = None
         end_date = None
@@ -181,6 +204,10 @@ async def train_model_task(job_id: str, request: RetrainRequest):
             data_loader=data_loader
         )
         
+        if _job_cancel_requested(job_id):
+            _mark_job_stopped(job_id, "Training cancelled")
+            return
+
         if result["status"] == "success":
             # 訓練期間の時刻を取得
             training_start_time = None
@@ -322,7 +349,8 @@ async def train_model_task(job_id: str, request: RetrainRequest):
                 "status": "completed",
                 "progress": 1.0,
                 "message": "Training completed successfully",
-                "result": result
+                "result": result,
+                "cancel_requested": False
             }
         else:
             error_msg = result.get('error', 'Unknown error')
@@ -331,7 +359,8 @@ async def train_model_task(job_id: str, request: RetrainRequest):
                 "status": "error",
                 "progress": 0.0,
                 "message": f"Training failed: {error_msg}",
-                "result": result
+                "result": result,
+                "cancel_requested": training_jobs.get(job_id, {}).get("cancel_requested", False)
             }
     except Exception as e:
         import traceback
@@ -343,7 +372,8 @@ async def train_model_task(job_id: str, request: RetrainRequest):
             "status": "error",
             "progress": 0.0,
             "message": f"Training error: {error_msg}",
-            "result": {"status": "error", "error": error_msg, "error_type": error_type, "traceback": error_detail}
+            "result": {"status": "error", "error": error_msg, "error_type": error_type, "traceback": error_detail},
+            "cancel_requested": training_jobs.get(job_id, {}).get("cancel_requested", False)
         }
     finally:
         # アクティブジョブから削除
@@ -373,6 +403,14 @@ async def retrain_model(request: RetrainRequest, background_tasks: BackgroundTas
         raise HTTPException(status_code=503, detail="ModelManager not initialized")
     
     job_id = str(uuid.uuid4())
+
+    training_jobs[job_id] = {
+        "status": "pending",
+        "progress": 0.0,
+        "message": "Training job accepted",
+        "result": None,
+        "cancel_requested": False
+    }
     
     # バックグラウンドタスクとして実行
     background_tasks.add_task(train_model_task, job_id, request)
@@ -382,6 +420,29 @@ async def retrain_model(request: RetrainRequest, background_tasks: BackgroundTas
         job_id=job_id,
         message="Training job started"
     )
+
+
+@app.delete("/retrain/{job_id}")
+async def cancel_retrain_job(job_id: str):
+    """再訓練ジョブのキャンセル"""
+    if job_id not in training_jobs:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    status = training_jobs[job_id].get("status")
+    if status in {"completed", "error", "stopped"}:
+        return {
+            "status": status,
+            "job_id": job_id,
+            "message": f"Job already finished with status={status}"
+        }
+
+    training_jobs[job_id]["cancel_requested"] = True
+    _mark_job_stopped(job_id)
+    return {
+        "status": "stopped",
+        "job_id": job_id,
+        "message": "Training cancellation requested"
+    }
 
 
 @app.get("/retrain/{job_id}/status", response_model=RetrainStatusResponse)

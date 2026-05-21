@@ -29,6 +29,19 @@ from api.backtest_service import run_backtest_task
 backtest_jobs: Dict[str, Dict] = {}
 
 
+def _job_cancel_requested(job_id: str) -> bool:
+    return bool(backtest_jobs.get(job_id, {}).get("cancel_requested", False))
+
+
+def _mark_job_stopped(job_id: str, message: str = "Backtest cancelled") -> None:
+    if job_id not in backtest_jobs:
+        return
+    backtest_jobs[job_id]["status"] = "stopped"
+    backtest_jobs[job_id]["message"] = message
+    backtest_jobs[job_id]["stage"] = "stopped"
+    backtest_jobs[job_id]["cancel_requested"] = True
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """アプリケーションのライフサイクル管理"""
@@ -112,22 +125,26 @@ async def backtest_task(job_id: str, request: BacktestRequest):
         except ValueError:
             end_date = datetime.fromisoformat(request.end_date)
     
-    backtest_jobs[job_id] = {
+    backtest_jobs.setdefault(job_id, {})
+    backtest_jobs[job_id].update({
         "status": "running",
-        "progress": 0.0,
+        "progress": backtest_jobs[job_id].get("progress", 0.0),
         "message": "Loading data...",
-        "result": None,
-        "current_record": 0,
-        "total_records": 0,
-        "data_quality": None,
+        "result": backtest_jobs[job_id].get("result"),
+        "current_record": backtest_jobs[job_id].get("current_record", 0),
+        "total_records": backtest_jobs[job_id].get("total_records", 0),
+        "data_quality": backtest_jobs[job_id].get("data_quality"),
         "stage": "loading",  # "loading", "quality_check", "feature_engineering", "backtesting"
         "model_name": request.model_name,
         "model_type": request.model_type,
-        "symbol": request.symbol
-    }
+        "symbol": request.symbol,
+        "cancel_requested": backtest_jobs[job_id].get("cancel_requested", False)
+    })
     
     # 進捗コールバック関数
     def update_progress(current: int, total: int, progress_pct: float, stage: str = None, message: str = None):
+        if _job_cancel_requested(job_id):
+            return
         if job_id in backtest_jobs:
             if total > 0:
                 backtest_jobs[job_id]["progress"] = progress_pct / 100.0
@@ -142,6 +159,8 @@ async def backtest_task(job_id: str, request: BacktestRequest):
     
     # データ品質コールバック関数
     def update_data_quality(data_quality: Dict):
+        if _job_cancel_requested(job_id):
+            return
         if job_id in backtest_jobs:
             backtest_jobs[job_id]["data_quality"] = data_quality
             backtest_jobs[job_id]["stage"] = "quality_check"
@@ -153,6 +172,10 @@ async def backtest_task(job_id: str, request: BacktestRequest):
                 backtest_jobs[job_id]["message"] = f"Data quality: {quality_score}/100 (No issues)"
     
     try:
+        if _job_cancel_requested(job_id):
+            _mark_job_stopped(job_id, "Backtest cancelled before execution")
+            return
+
         # バックテストを実行（別スレッドで実行してイベントループをブロックしない）
         # asyncio.to_thread()を使用することで、同期的なrun_backtest_taskが
         # イベントループをブロックせず、APIサーバーが応答可能になる
@@ -176,6 +199,10 @@ async def backtest_task(job_id: str, request: BacktestRequest):
             data_quality_callback=update_data_quality
         )
         
+        if _job_cancel_requested(job_id):
+            _mark_job_stopped(job_id)
+            return
+
         if result.get("status") == "success":
             # 既存のjob_statusを保持しつつ、完了状態を更新
             current_record = backtest_jobs[job_id].get("current_record", 0)
@@ -194,7 +221,8 @@ async def backtest_task(job_id: str, request: BacktestRequest):
                     "stage": "completed",
                     "model_name": request.model_name,
                     "model_type": request.model_type,
-                    "symbol": request.symbol
+                    "symbol": request.symbol,
+                    "cancel_requested": False
                 })
             else:
                 backtest_jobs[job_id] = {
@@ -208,7 +236,8 @@ async def backtest_task(job_id: str, request: BacktestRequest):
                     "stage": "completed",
                     "model_name": request.model_name,
                     "model_type": request.model_type,
-                    "symbol": request.symbol
+                    "symbol": request.symbol,
+                    "cancel_requested": False
                 }
             logger.info(f"Backtest job {job_id} completed successfully")
         else:
@@ -226,7 +255,8 @@ async def backtest_task(job_id: str, request: BacktestRequest):
                     "current_record": current_record if current_record is not None else 0,
                     "total_records": total_records if total_records is not None else 0,
                     "data_quality": data_quality,
-                    "stage": "error"
+                    "stage": "error",
+                    "cancel_requested": backtest_jobs.get(job_id, {}).get("cancel_requested", False)
                 })
             else:
                 backtest_jobs[job_id] = {
@@ -237,7 +267,8 @@ async def backtest_task(job_id: str, request: BacktestRequest):
                     "current_record": 0,
                     "total_records": 0,
                     "data_quality": None,
-                    "stage": "error"
+                    "stage": "error",
+                    "cancel_requested": backtest_jobs.get(job_id, {}).get("cancel_requested", False)
                 }
             logger.error(f"Backtest job {job_id} failed: {result.get('error', 'Unknown error')}")
     except Exception as e:
@@ -265,7 +296,8 @@ async def backtest_task(job_id: str, request: BacktestRequest):
             "current_record": current_record if current_record is not None else 0,
             "total_records": total_records if total_records is not None else 0,
             "data_quality": data_quality,
-            "stage": "error"
+            "stage": "error",
+            "cancel_requested": backtest_jobs.get(job_id, {}).get("cancel_requested", False)
         }
 
 
@@ -278,6 +310,21 @@ async def run_backtest(request: BacktestRequest, background_tasks: BackgroundTas
     進捗は GET /backtest/{job_id}/status で確認できます。
     """
     job_id = str(uuid.uuid4())
+
+    backtest_jobs[job_id] = {
+        "status": "pending",
+        "progress": 0.0,
+        "message": "Backtest job accepted",
+        "result": None,
+        "current_record": 0,
+        "total_records": 0,
+        "data_quality": None,
+        "stage": "pending",
+        "model_name": request.model_name,
+        "model_type": request.model_type,
+        "symbol": request.symbol,
+        "cancel_requested": False
+    }
     
     # バックグラウンドタスクとして実行
     background_tasks.add_task(backtest_task, job_id, request)
@@ -287,6 +334,29 @@ async def run_backtest(request: BacktestRequest, background_tasks: BackgroundTas
         job_id=job_id,
         message="Backtest job started"
     )
+
+
+@app.delete("/backtest/{job_id}")
+async def cancel_backtest_job(job_id: str):
+    """バックテストジョブのキャンセル"""
+    if job_id not in backtest_jobs:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    status = backtest_jobs[job_id].get("status")
+    if status in {"completed", "error", "stopped"}:
+        return {
+            "status": status,
+            "job_id": job_id,
+            "message": f"Job already finished with status={status}"
+        }
+
+    backtest_jobs[job_id]["cancel_requested"] = True
+    _mark_job_stopped(job_id)
+    return {
+        "status": "stopped",
+        "job_id": job_id,
+        "message": "Backtest cancellation requested"
+    }
 
 
 @app.get("/backtest/{job_id}/status", response_model=BacktestStatusResponse)

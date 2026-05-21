@@ -28,7 +28,7 @@ class RetrainResponse(BaseModel):
 class RetrainStatusResponse(BaseModel):
     """再訓練ステータスレスポンス"""
     job_id: str
-    status: str  # "pending", "running", "completed", "error"
+    status: str  # "pending", "running", "completed", "stopped", "error"
     progress: Optional[float] = None
     message: Optional[str] = None
     result: Optional[Dict] = None
@@ -62,7 +62,7 @@ class BacktestResponse(BaseModel):
 class BacktestStatusResponse(BaseModel):
     """バックテストステータスレスポンス"""
     job_id: str
-    status: str  # "pending", "running", "completed", "error"
+    status: str  # "pending", "running", "completed", "stopped", "error"
     progress: Optional[float] = None
     message: Optional[str] = None
     result: Optional[Dict] = None
