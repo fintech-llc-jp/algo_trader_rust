@@ -25,6 +25,9 @@ CREATE TABLE IF NOT EXISTS market_board_price_levels (
     side        VARCHAR(3)       NOT NULL,
     level_index INTEGER          NOT NULL
 );
+-- FK カラムへのインデックス（JOIN クエリの高速化）
+CREATE INDEX idx_market_board_price_levels_snapshot_id
+    ON market_board_price_levels (snapshot_id);
 
 -- ----- 約定履歴 -----
 
@@ -146,3 +149,5 @@ CREATE TABLE IF NOT EXISTS prediction_tracker_verifications (
 );
 CREATE INDEX idx_prediction_tracker_verifications_symbol
     ON prediction_tracker_verifications (symbol, horizon, prediction_timestamp);
+CREATE INDEX idx_prediction_tracker_verifications_prediction_id
+    ON prediction_tracker_verifications (prediction_id);
