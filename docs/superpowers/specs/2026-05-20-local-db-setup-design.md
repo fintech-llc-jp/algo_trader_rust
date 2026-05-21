@@ -285,9 +285,11 @@ docker compose ps
 ./sync_from_vps.sh
 
 # 4. ml_pipeline から接続テスト
-cd ../vendor/ml_pipeline_snapshot_2026-04-12
-cp .env .env.vps_backup           # 既存の VPS 設定をバックアップ
-cp ../../infra/.env.local .env    # ローカル用設定を反映
+# settings.py は vendor/.env を読む（3階層上を参照する設計）
+cd ../vendor
+cp ml_pipeline_snapshot_2026-04-12/.env .env.vps_backup  # VPS 設定をバックアップ
+cp ../infra/.env.local .env                               # ローカル用設定を vendor/.env に配置
+cd ml_pipeline_snapshot_2026-04-12
 python test_db_query.py
 ```
 
@@ -317,8 +319,9 @@ vendor/ml_pipeline_snapshot_2026-04-12/.env  ← VPS 接続設定（既存）
 infra/.env.local                              ← ローカル用上書き設定（新規）
 ```
 
-ML パイプラインを**ローカルで動かす際**は `infra/.env.local` の内容を `.env` に反映して使う。  
-VPS 接続に戻すときは元の `.env` に戻す。（将来的に `python-dotenv` の `override` 機能で自動化可能）
+ML パイプラインを**ローカルで動かす際**は `infra/.env.local` を `vendor/.env` としてコピーする。  
+`config/settings.py` が `load_dotenv()` で読む `.env` のパスは `vendor/.env`（settings.py から3階層上）のため。  
+VPS 接続に戻すときは `vendor/.env` を削除すれば環境変数デフォルト値（localhost:5432）は維持されるが、`DB_PASSWORD` が空になるため VPS 設定が必要な場合は別途設定すること。
 
 ---
 

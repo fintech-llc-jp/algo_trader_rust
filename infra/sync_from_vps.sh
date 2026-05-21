@@ -88,8 +88,10 @@ if [[ "${MODE}" == "--full" ]]; then
     ssh "${VPS_HOST}" "${VPS_PSQL} -c \"\COPY (SELECT id, symbol, timestamp FROM market_board_snapshots ORDER BY id) TO stdout\"" \
         | psql "${LOCAL_EXCH_SIM}" -c "\COPY market_board_snapshots (id, symbol, timestamp) FROM stdin"
 
-    echo "  コピー中: market_board_price_levels..."
-    ssh "${VPS_HOST}" "${VPS_PSQL} -c \"\COPY (SELECT id, snapshot_id, price, quantity, side, level_index FROM market_board_price_levels ORDER BY id) TO stdout\"" \
+    # snapshots コピー後のローカル最大 ID を取得（VPS はライブ収集中のため新 snapshot が増えている可能性あり）
+    LOCAL_SNAP_MAX=$(psql "${LOCAL_EXCH_SIM}" -t -c "SELECT COALESCE(MAX(id), 0) FROM market_board_snapshots;" | tr -d ' \t\r\n')
+    echo "  コピー中: market_board_price_levels (snapshot_id <= ${LOCAL_SNAP_MAX})..."
+    ssh "${VPS_HOST}" "${VPS_PSQL} -c \"\COPY (SELECT id, snapshot_id, price, quantity, side, level_index FROM market_board_price_levels WHERE snapshot_id <= ${LOCAL_SNAP_MAX} ORDER BY id) TO stdout\"" \
         | psql "${LOCAL_EXCH_SIM}" -c "\COPY market_board_price_levels (id, snapshot_id, price, quantity, side, level_index) FROM stdin"
 
     # 独立テーブル
