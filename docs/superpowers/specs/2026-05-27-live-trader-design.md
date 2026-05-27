@@ -220,24 +220,47 @@ python trader.py \
 - `--live` と `--dry-run` のどちらも指定なし → エラー終了
 - `--live` と `--dry-run` を同時指定 → エラー終了
 
-### 7.2 メインループ（1秒ごと）
+### 7.2 ハイブリッドループ設計
+
+ML予測と注文管理を分離し、注文管理を event-driven にする。
 
 ```
-1. MarketDataFeed.get_board() → 最新板取得
-2. storage.Recorder.save_board() → DB 保存（dry-run 時も保存）
-3. RollingBuffer.add(board)
-4. ウォームアップ確認（60秒）
-5. Predictor.predict() → signal, confidence
-6. _manage_orders(signal, confidence, board)
-7. 自動モデルリロードチェック（30分ごと・ポジションなし時）
-8. 定期ログ（30秒ごと）
+┌─────────────────────────────────────────────┐
+│ GMO WebSocket スレッド（board 更新のたびに）   │
+│   on_board_update(board):                   │
+│     1. _latest_board を更新                  │
+│     2. bid/ask が前回から変化していれば        │
+│        → 即座に _chase_side() で repricing   │
+│           （cancel → 再発注、数十ms以内）      │
+└─────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────┐
+│ ML予測タイマー（1秒ごと）                      │
+│   on_tick():                                │
+│     1. RollingBuffer.add(_latest_board)     │
+│     2. storage.Recorder.save_board()        │
+│     3. ウォームアップ確認（60秒）              │
+│     4. Predictor.predict() → signal 更新    │
+│     5. 自動モデルリロードチェック（30分ごと）   │
+│     6. 定期ログ（30秒ごと）                   │
+└─────────────────────────────────────────────┘
 ```
+
+**設計方針:**
+- ML予測は1秒足の特徴量で訓練されているため、予測サイクルは1秒を維持
+- 注文の repricing（cancel → 再発注）のみ event-driven で高速化
+- DB保存・特徴量計算は1秒ごとで十分
+- スレッドセーフのため `_latest_board` / `_current_signal` は `threading.Lock` で保護
+
+**ExchSim の場合:**
+- WebSocket 非対応のため 1秒ポーリングのまま（`ExchSimFeed` が従来通り動作）
+- `on_board_update()` を1秒ごとに呼ぶことで同じインターフェースを維持
 
 ### 7.3 dry-run 動作
 
 - `ExchangeClient` の発注・キャンセルメソッドは呼ばない
 - 板データ保存・ログ・損益計算はすべて実行
-- `gmo_trades` への保存も行う（実取引の代わりに `dry_run=true` フラグ付きで）
+- `gmo_trades` への保存も行う（実取引の代わりに `is_dry_run=true` フラグ付きで）
 
 ---
 
