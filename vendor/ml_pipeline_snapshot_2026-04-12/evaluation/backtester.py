@@ -23,13 +23,17 @@ class Backtester:
         self,
         initial_capital: float = None,
         commission_rate: float = None,
-        slippage_bps: float = None
+        slippage_bps: float = None,
+        maker_order: bool = False,
     ):
         config = BacktestConfig()
         self.initial_capital = initial_capital or config.INITIAL_CAPITAL
-        self.commission_rate = commission_rate or config.COMMISSION_RATE
-        self.slippage_bps = slippage_bps or config.SLIPPAGE_BPS
-        
+        # commission_rate は負値（リベート）もあり得るので or を使わず明示的に None チェック
+        self.commission_rate = commission_rate if commission_rate is not None else config.COMMISSION_RATE
+        self.slippage_bps = slippage_bps if slippage_bps is not None else config.SLIPPAGE_BPS
+        # maker_order=True のとき: mid_price で約定 + commission_rate をリベートとして扱う
+        self.maker_order = maker_order
+
         self.trades = []
         self.equity_curve = []
     
@@ -81,10 +85,15 @@ class Backtester:
             signal = signals.loc[idx] if idx in signals.index else 0
             conf = confidence.loc[idx] if idx in confidence.index else 0.0
             price = row['mid_price']
-            
+
             # ASK/BID価格を取得（存在する場合）
             ask_price = row.get('ask_price_1', price)
             bid_price = row.get('bid_price_1', price)
+
+            # Maker注文モード: 全約定をmid_priceで実施（スプレッド内側の指値想定）
+            if self.maker_order:
+                ask_price = price
+                bid_price = price
             
             # 損切・利益確定のチェック（ポジションがある場合）
             if position != 0 and entry_price > 0:
@@ -433,6 +442,197 @@ class Backtester:
         
         return metrics
     
+    def run_maker_limit(
+        self,
+        df: pd.DataFrame,
+        signals: pd.Series,
+        confidence: pd.Series,
+        confidence_threshold: float = 0.60,
+        fixed_quantity: float = 0.01,
+        tick_size: float = 1.0,
+        max_hold_seconds: int = 0,
+    ) -> Dict:
+        """
+        リアルなMaker指値注文シミュレーション
+
+        BUYシグナル時:
+          - 初回: current_bid + 1*tick で指値
+          - シグナル継続中: 毎秒 tick を加算 (ask-tick を上限, Takerにならない)
+          - 約定判定: exec_price_sell <= 指値価格 かつ exec_price_sell > 0
+
+        SELLシグナル時 (対称):
+          - 初回: current_ask - 1*tick で指値
+          - シグナル継続中: 毎秒 tick を減算 (bid+tick を下限)
+          - 約定判定: exec_price_buy >= 指値価格 かつ exec_price_buy > 0
+
+        シグナル変化 / HOLD:
+          - 未約定注文をキャンセル
+
+        max_hold_seconds > 0 のとき:
+          - ポジション保有が max_hold_seconds 秒を超えたら、
+            逆方向の Maker 指値チェイス（bid+N / ask-N）で決済を開始する
+          - シグナルに関係なく決済方向のチェイスを継続し、約定したら終了
+
+        commission_rate < 0 のとき、各約定でリベートを受け取る。
+        """
+        self.trades = []
+        self.equity_curve = []
+
+        capital     = self.initial_capital
+        position    = 0.0
+        entry_price = 0.0
+
+        pending_side  = None   # 'BUY' | 'SELL' | None
+        pending_price = 0.0
+        chase_count   = 0      # シグナルが継続した秒数
+
+        entry_tick        = 0      # ポジション開始時の tick カウンタ
+        tick_counter      = 0      # 全体 tick カウンタ（1秒 = 1tick 想定）
+        timeout_exit_mode = False  # タイムアウト指値決済モード
+
+        for idx, row in df.iterrows():
+            tick_counter += 1
+            mid    = float(row['mid_price'])
+            spread = float(row.get('spread', 0.0))
+            bid    = float(row.get('bid_price_1', mid - spread / 2.0))
+            ask    = float(row.get('ask_price_1', mid + spread / 2.0))
+
+            raw_sell = row.get('exec_price_sell', 0.0)
+            raw_buy  = row.get('exec_price_buy',  0.0)
+            exec_sell = 0.0 if (raw_sell is None or raw_sell != raw_sell) else float(raw_sell)
+            exec_buy  = 0.0 if (raw_buy  is None or raw_buy  != raw_buy ) else float(raw_buy)
+
+            sig  = int(signals.loc[idx])      if idx in signals.index   else 0
+            conf = float(confidence.loc[idx]) if idx in confidence.index else 0.0
+            if conf < confidence_threshold:
+                sig = 0
+
+            # ─── Step T: タイムアウト → 指値チェイス決済モード ─────────────
+            if max_hold_seconds > 0 and position != 0.0:
+                if (tick_counter - entry_tick) >= max_hold_seconds:
+                    timeout_exit_mode = True   # 決済チェイス開始
+
+            # タイムアウト決済モード中: 逆方向シグナルで上書き（チェイス継続）
+            if timeout_exit_mode:
+                if position == 0.0:
+                    timeout_exit_mode = False  # 約定完了 → モード解除
+                else:
+                    # ロングなら SELL チェイス、ショートなら BUY チェイス
+                    sig = -1 if position > 0 else 1
+
+            # ─── Step A: 指値注文の約定チェック ─────────────────────────────
+            if pending_side == 'BUY' and 0 < pending_price < ask:
+                # sell takerが指値価格以下で約定していれば、こちらのbid limitが刺さる
+                if exec_sell > 0 and exec_sell <= pending_price:
+                    fill   = pending_price
+                    rebate = fill * fixed_quantity * abs(self.commission_rate)
+
+                    if position < 0:
+                        # ショートカバー
+                        pnl = (entry_price - fill) * fixed_quantity + rebate
+                        capital += pnl
+                        action = 'TIMEOUT_COVER' if timeout_exit_mode else 'COVER_SHORT'
+                        self.trades.append({
+                            'timestamp': idx, 'action': action,
+                            'price': fill, 'quantity': fixed_quantity,
+                            'pnl': pnl, 'commission': -rebate, 'capital': capital,
+                        })
+                        position = 0.0; entry_price = 0.0
+                        timeout_exit_mode = False
+                    elif position == 0:
+                        capital -= fill * fixed_quantity
+                        capital += rebate
+                        position    = fixed_quantity
+                        entry_price = fill
+                        entry_tick  = tick_counter   # ← タイムアウト計測開始
+                        self.trades.append({
+                            'timestamp': idx, 'action': 'BUY',
+                            'price': fill, 'quantity': fixed_quantity,
+                            'pnl': 0.0, 'commission': -rebate, 'capital': capital,
+                        })
+                    pending_side = None; pending_price = 0.0; chase_count = 0
+
+            elif pending_side == 'SELL' and pending_price > bid:
+                # buy takerが指値価格以上で約定していれば、こちらのask limitが刺さる
+                if exec_buy > 0 and exec_buy >= pending_price:
+                    fill   = pending_price
+                    rebate = fill * fixed_quantity * abs(self.commission_rate)
+
+                    if position > 0:
+                        # ロングクローズ
+                        pnl = (fill - entry_price) * position + rebate
+                        capital += fill * fixed_quantity + rebate
+                        action = 'TIMEOUT_SELL' if timeout_exit_mode else 'SELL'
+                        self.trades.append({
+                            'timestamp': idx, 'action': action,
+                            'price': fill, 'quantity': fixed_quantity,
+                            'pnl': pnl, 'commission': -rebate, 'capital': capital,
+                        })
+                        position = 0.0; entry_price = 0.0
+                        timeout_exit_mode = False
+                    elif position == 0:
+                        capital += rebate
+                        position    = -fixed_quantity
+                        entry_price = fill
+                        entry_tick  = tick_counter   # ← タイムアウト計測開始
+                        self.trades.append({
+                            'timestamp': idx, 'action': 'SHORT',
+                            'price': fill, 'quantity': fixed_quantity,
+                            'pnl': 0.0, 'commission': -rebate, 'capital': capital,
+                        })
+                    pending_side = None; pending_price = 0.0; chase_count = 0
+
+            # ─── Step B: シグナルに基づいて指値注文を管理 ──────────────────
+            if sig == 1:   # BUY → ロングを持ちたい
+                if position <= 0:
+                    if pending_side != 'BUY':
+                        # 新規 or SELL注文をキャンセルしてBUYへ
+                        chase_count  = 1
+                        pending_side = 'BUY'
+                    else:
+                        chase_count += 1
+
+                    # 今の bid + chase_count * tick（ask-tick を上限）
+                    new_price = bid + chase_count * tick_size
+                    new_price = min(new_price, ask - tick_size)
+                    if new_price > bid:
+                        pending_price = new_price
+                    else:
+                        # スプレッドが狭すぎて内側に出せない
+                        pending_side = None; pending_price = 0.0; chase_count = 0
+
+            elif sig == -1:  # SELL → ショートを持ちたい
+                if position >= 0:
+                    if pending_side != 'SELL':
+                        chase_count  = 1
+                        pending_side = 'SELL'
+                    else:
+                        chase_count += 1
+
+                    new_price = ask - chase_count * tick_size
+                    new_price = max(new_price, bid + tick_size)
+                    if new_price < ask:
+                        pending_price = new_price
+                    else:
+                        pending_side = None; pending_price = 0.0; chase_count = 0
+
+            elif not timeout_exit_mode:  # HOLD → 未約定注文をキャンセル（タイムアウト中は継続）
+                if pending_side is not None:
+                    pending_side = None; pending_price = 0.0; chase_count = 0
+
+            # ─── Step C: equity curve 更新 ──────────────────────────────
+            eq = capital
+            if position > 0:
+                eq += position * bid          # ロングはBIDで評価
+            elif position < 0:
+                eq += abs(position) * (entry_price - ask)  # ショート評価
+            self.equity_curve.append({'timestamp': idx, 'equity': eq, 'position': position})
+
+        metrics    = self._calculate_performance_metrics()
+        cost_stats = self._calculate_cost_statistics(df)
+        metrics.update(cost_stats)
+        return metrics
+
     def get_equity_curve(self) -> pd.DataFrame:
         """資金曲線を取得"""
         return pd.DataFrame(self.equity_curve)

@@ -121,8 +121,8 @@ class ModelConfig:
     }
     
     # 特徴量生成
-    LABEL_HORIZON = 5  # 5秒後の価格で予測
-    LABEL_THRESHOLD = 0.0001  # 0.01%の閾値（テスト用に下げる）
+    LABEL_HORIZON = 5   # 5秒後の価格で予測
+    LABEL_THRESHOLD = 0.0001  # 0.01%の閾値
 
 
 class BacktestConfig:

@@ -1,0 +1,11 @@
+cd /Users/sakamoto.yukio/workspace/algo_trader_rust/vendor/ml_pipeline_snapshot_2026-04-12
+source .venv/bin/activate
+
+python - <<'PY'
+from pathlib import Path
+src = Path("requirements.txt").read_text()
+Path("requirements.local.txt").write_text(src.replace("lightgbm==4.1.0", "lightgbm==4.6.0"))
+print("created requirements.local.txt")
+PY
+
+pip install -r requirements.local.txt
